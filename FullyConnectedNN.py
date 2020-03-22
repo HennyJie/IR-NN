@@ -1,7 +1,7 @@
 '''
 @Author: your name
 @Date: 2020-03-21 22:25:32
-@LastEditTime: 2020-03-22 15:35:44
+@LastEditTime: 2020-03-22 15:54:28
 @LastEditors: Please set LastEditors
 @Description: In User Settings Edit
 @FilePath: /IR-NN/FullyConnectedNN.py
@@ -21,7 +21,7 @@ learning_rate = 0.01
 log_interval = 10
 
 
-class CustomDataset(Dataset):
+class Dataset(Dataset):
     def __init__(self, filename):
         with open(filename) as f:
             lines = f.read().split('\n')
@@ -54,12 +54,12 @@ class Net(nn.Module):
 
 
 def run_nn():
-    train_dataset = CustomDataset(
+    train_dataset = Dataset(
         'MQ2007/Fold1/train.txt')
-    test_dataset = CustomDataset(
+    test_dataset = Dataset(
         'MQ2007/Fold1/test.txt')
     train_loader = DataLoader(train_dataset, batch_size=200, num_workers=5)
-    test_loader = DataLoader(test_dataset, batch_size=200, num_workders=5)
+    test_loader = DataLoader(test_dataset, batch_size=200, num_workers=5)
 
     net = Net()
     print(net)
