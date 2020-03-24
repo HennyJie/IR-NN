@@ -16,17 +16,32 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from torch.utils.data import TensorDataset
 import numpy as np
+import pandas as pd
+# import shutil
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 input_size = 46
-hidden_size = 128
+# hidden_size = 32
 num_classes = 3
 
 num_epochs = 1
 batch_size = 32
 learning_rate = 1e-4
 log_interval = 10
+
+train_data_path = '/home/xuankan/Documents/IR-NN/MQ2007/Fold1/train.txt'
+validate_data_path = '/home/xuankan/Documents/IR-NN/MQ2007/Fold1/vali.txt'
+test_data_path = '/home/xuankan/Documents/IR-NN/MQ2007/Fold1/test.txt'
+
+train_add_newfeatures_path = '/home/xuankan/Documents/IR-NN/MQ2007/Fold1/train_with_newfeatures.txt'
+validate_add_newfeatures_path = '/home/xuankan/Documents/IR-NN/MQ2007/Fold1/vali_with_newfeatures.txt'
+test_add_newfeatures_path = '/home/xuankan/Documents/IR-NN/MQ2007/Fold1/test_with_newfeatures.txt'
+
+# shutil.copy(train_data_path, train_add_newfeatures_path)
+# shutil.copy(validate_data_path, validate_add_newfeatures_path)
+# shutil.copy(test_data_path, test_add_newfeatures_path)
 
 
 class Dataset(Dataset):
@@ -53,11 +68,11 @@ class Dataset(Dataset):
 
 
 class Net(nn.Module):
-    def __init__(self, input_size=46, hidden_size=128, num_classes=3):
+    def __init__(self, input_size=46, num_classes=3):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, num_classes)
+        self.fc1 = nn.Linear(input_size, 32)
+        self.fc2 = nn.Linear(32, 8)
+        self.fc3 = nn.Linear(8, num_classes)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -67,7 +82,7 @@ class Net(nn.Module):
 
 
 def train(train_loader, validate_loader):
-    net = Net(input_size, hidden_size, num_classes).to(device)
+    net = Net(input_size, num_classes).to(device)
 
     optimizer = optim.SGD(net.parameters(), lr=learning_rate, momentum=0.9)
     criterion = nn.CrossEntropyLoss()
@@ -145,7 +160,7 @@ def test(test_loader, model):
 def save_new_feature(train_loader, validate_loader, test_loader, model):
     train_new_features = []
     validate_new_features = []
-    test_new_feature = []
+    test_new_features = []
 
     with torch.no_grad():
         for X_train, y_train in train_loader:
@@ -153,7 +168,8 @@ def save_new_feature(train_loader, validate_loader, test_loader, model):
             y_train = y_train.to(device)
             train_batch_net_out, train_batch_new_features = model(
                 X_train.float())
-            train_new_features.append(train_batch_new_features.tolist())
+            for new_feature in train_batch_new_features.tolist():
+                train_new_features.append(new_feature)
 
     with torch.no_grad():
         for X_validate, y_validate in validate_loader:
@@ -161,43 +177,41 @@ def save_new_feature(train_loader, validate_loader, test_loader, model):
             y_validate = y_validate.to(device)
             validate_batch_net_out, validate_batch_new_features = model(
                 X_validate.float())
-            validate_new_features.append(validate_batch_new_features.tolist())
+            for new_feature in validate_batch_new_features.tolist():
+                validate_new_features.append(new_feature)
 
     with torch.no_grad():
         for X_test, y_test in test_loader:
             X_test = X_test.to(device)
             y_test = y_test.to(device)
             test_batch_net_out, test_batch_new_features = model(X_test.float())
-            test_new_features.append(test_batch_new_features.tolist())
+            for new_feature in test_batch_new_features.tolist():
+                test_new_features.append(new_feature)
 
-    return train_new_features, validate_new_features, test_new_features
+    return np.array(train_new_features), np.array(validate_new_features), np.array(test_new_features)
 
 
 if __name__ == "__main__":
     # train dataloader
-    train_dataset = Dataset(
-        '/home/xuankan/Documents/IR-NN/MQ2007/Fold1/train.txt')
+    train_dataset = Dataset(train_data_path)
     train_dataset = TensorDataset(train_dataset.X, train_dataset.y)
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
 
     # validate dataloader
-    validate_dataset = Dataset(
-        '/home/xuankan/Documents/IR-NN/MQ2007/Fold1/vali.txt')
+    validate_dataset = Dataset(validate_data_path)
     validate_dataset = TensorDataset(validate_dataset.X, validate_dataset.y)
     validate_loader = DataLoader(
         validate_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
 
     # test dataloader
-    test_dataset = Dataset(
-        '/home/xuankan/Documents/IR-NN/MQ2007/Fold1/test.txt')
+    test_dataset = Dataset(test_data_path)
     test_dataset = TensorDataset(test_dataset.X, test_dataset.y)
     test_loader = DataLoader(
         test_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
 
     min_loss_epoch = train(train_loader, validate_loader)
-
-    model = Net(input_size, hidden_size, num_classes).to(device)
+    model = Net(input_size, num_classes).to(device)
     model.load_state_dict(torch.load(
         '/home/xuankan/Documents/IR-NN/Checkpoints/model_epoch_{}.ckpt'.format(min_loss_epoch)))
 
@@ -205,3 +219,26 @@ if __name__ == "__main__":
 
     train_new_features, validate_new_features, test_new_features = save_new_feature(
         train_loader, validate_loader, test_loader, model)
+    data = pd.read_csv(train_data_path, sep="\s+", header=None)
+    for i in range(8):
+        tmp = list(map(lambda x: str(i+47)+':'+f"{x:.6f}",
+                       train_new_features[:, i]))
+        data.insert(i+48, str(i), tmp)
+    data.to_csv(train_add_newfeatures_path, sep=' ', header=False, index=False)
+
+    # with open(train_data_path, 'r') as train_file:
+    #     lines = train_file.read().split('\n')[:-1]
+    #     new_lines = []
+
+    #     for i, line in enumerate(lines):
+    #         new_line = line.split(' ')
+    #         for j in range(0, 8):
+    #             new_feature = str(j+47) + ':' + \
+    #                 str(round(train_new_features[i][j], 6))
+    #             new_line.insert(j+48, new_feature)
+    #         new_lines.append(new_line)
+
+    #     with open(train_add_newfeatures_path, 'w') as new_train_file:
+    #         for row in new_lines:
+    #             new_train_file.write(str(row))
+    #             new_train_file.write('\n')
