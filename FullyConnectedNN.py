@@ -28,10 +28,11 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 input_size = 46
 num_classes = 3
 
-num_epochs = 100
+num_epochs = 10
 batch_size = 32
 learning_rate = 1e-4
 log_interval = 10
+num_new_features = 8
 
 
 class Dataset(Dataset):
@@ -51,13 +52,15 @@ class Dataset(Dataset):
                 y.append(one_hot_label)
 
         self.X = torch.from_numpy(np.array(X))
+        m, n = self.X.shape
+        self.X = self.X.reshape(m, 1, n)
         self.y = torch.from_numpy(np.array(y))
 
-        num_most_common = max(num_in_each_class.values())
+        sample_num = sum(num_in_each_class.values())
         num_in_each_class = sorted(
             num_in_each_class.items(), key=lambda d: d[0])
 
-        self.weights = [float(num_most_common/value)
+        self.weights = [float(sample_num/value)
                         for key, value in num_in_each_class]
 
     def __len__(self):
@@ -67,19 +70,52 @@ class Dataset(Dataset):
         return self.X[index], self.y[index]
 
 
+# class Net(nn.Module):
+#     def __init__(self, input_size=46, num_classes=3):
+#         super(Net, self).__init__()
+#         self.fc1 = nn.Linear(input_size, 128)
+#         self.bn1 = nn.BatchNorm1d(num_features=128)
+#         self.fc2 = nn.Linear(128, 64)
+#         self.bn2 = nn.BatchNorm1d(num_features=64)
+#         self.fc3 = nn.Linear(64, num_new_features)
+#         self.bn3 = nn.BatchNorm1d(num_features=num_new_features)
+#         self.fc4 = nn.Linear(num_new_features, num_classes)
+
+#     def forward(self, x):
+#         x = F.relu(self.bn1(self.fc1(x)))
+#         x = F.relu(self.bn2(self.fc2(x)))
+#         x = F.relu(self.bn3(self.fc3(x)))
+#         out = self.fc4(x)
+#         return out, x
+
 class Net(nn.Module):
-    def __init__(self, input_size=46, num_classes=3):
+    def __init__(self, input_size=46, hidden_size=32, num_classes=3):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(input_size, 64)
-        self.bn1 = nn.BatchNorm1d(num_features=64)
-        self.fc2 = nn.Linear(64, 16)
-        self.fc3 = nn.Linear(16, num_classes)
+        self.conv1 = nn.Sequential(
+            nn.Conv1d(1, 8, 8),
+            nn.ReLU(),
+            nn.AvgPool1d(kernel_size=2),
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv1d(8, 16, 4),
+            nn.ReLU(),
+            nn.AvgPool1d(kernel_size=2),
+        )
+        self.bn = nn.BatchNorm1d(128)
+        self.linear = nn.Linear(128, 32)
+        self.linear1 = nn.Linear(32, num_new_features)
+        self.out = nn.Linear(num_new_features, 3)
 
     def forward(self, x):
-        x = F.relu(self.bn1(self.fc1(x)))
-        x = F.relu(self.fc2(x))
-        out = self.fc3(x)
-        return out, x
+        n, _, _ = x.shape
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = x.reshape(n, -1)
+        x = self.bn(x)
+        x = self.linear(x)
+        x = self.linear1(x)
+        output = self.out(x)
+        return output, x
 
 
 def train(train_dataset, validate_dataset):
@@ -92,7 +128,7 @@ def train(train_dataset, validate_dataset):
     validate_loader = DataLoader(
         validate_tensor_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
 
-    net = Net(input_size, num_classes).to(device)
+    net = Net(input_size, num_new_features, num_classes).to(device)
 
     optimizer = optim.SGD(net.parameters(), lr=learning_rate, momentum=0.9)
 
@@ -229,11 +265,11 @@ def save_new_feature(train_dataset, validate_dataset, test_dataset, model):
     test_new_features = np.array(test_new_features)
 
     train_new_features = (
-        train_new_features - train_new_features.min(axis=0)) / train_new_features.max(axis=0)
+        train_new_features - train_new_features.min(axis=0)) / (train_new_features.max(axis=0) - train_new_features.min(axis=0))
     validate_new_features = (
-        validate_new_features - validate_new_features.min(axis=0)) / validate_new_features.max(axis=0)
+        validate_new_features - validate_new_features.min(axis=0)) / (validate_new_features.max(axis=0) - validate_new_features.min(axis=0))
     test_new_features = (
-        test_new_features - test_new_features.min(axis=0)) / test_new_features.max(axis=0)
+        test_new_features - test_new_features.min(axis=0)) / (test_new_features.max(axis=0) - test_new_features.min(axis=0))
 
     return train_new_features, validate_new_features, test_new_features
 
@@ -248,14 +284,14 @@ def write_new_features_to_file(train_new_features, train_data_path, validate_new
         test_data_path)[0] + '/test_with_newfeatures.txt'
 
     data = pd.read_csv(train_data_path, sep="\s+", header=None)
-    for i in range(8):
+    for i in range(num_new_features):
         tmp = list(map(lambda x: str(i+47)+':'+f"{x:.6f}",
                        train_new_features[:, i]))
         data.insert(i+48, str(i), tmp)
     data.to_csv(train_add_newfeatures_path, sep=' ', header=False, index=False)
 
     data = pd.read_csv(validate_data_path, sep="\s+", header=None)
-    for i in range(8):
+    for i in range(num_new_features):
         tmp = list(map(lambda x: str(i+47)+':'+f"{x:.6f}",
                        validate_new_features[:, i]))
         data.insert(i+48, str(i), tmp)
@@ -263,7 +299,7 @@ def write_new_features_to_file(train_new_features, train_data_path, validate_new
                 sep=' ', header=False, index=False)
 
     data = pd.read_csv(test_data_path, sep="\s+", header=None)
-    for i in range(8):
+    for i in range(num_new_features):
         tmp = list(map(lambda x: str(i+47)+':'+f"{x:.6f}",
                        test_new_features[:, i]))
         data.insert(i+48, str(i), tmp)
